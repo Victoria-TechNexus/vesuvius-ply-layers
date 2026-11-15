@@ -1,4 +1,4 @@
-# Automatic layer separation and meshing for Herculaneum scroll CT (draft)
+# Automatic layer separation and meshing for Herculaneum scroll CT
 
 From raw CT to a flattened papyrus layer with ink, with no manual tracing.
 Tested on PHerc. Paris 4 (ESRF 2.4 µm scan, read at level 2 = 9.6 µm).
@@ -57,6 +57,8 @@ segment's surface and on ours, scored against the same human labels:
 | official segment (human-made) | +0.80 | 87% | 6% |
 | ours (automatic, all six tiles) | +0.73 | 78% | 5% |
 
+
+<img src="images/labels_9511.png" align="right" width="400">
 Our surface is fully automatic. With the same ink model and reading, it scores +0.73 against the human labels;
 the hand-made official surface, on which the labels were drawn, scores +0.80. Ours is scored only where the
 official surface lies within 6 voxels of it (about half of our sheet).
@@ -70,6 +72,7 @@ neighbouring tile's copy of the layer.
 
 **Compute** (Colab, per 192 × 416 × 416 tile): about 13–14 min and 11–12 GB peak RAM for stages 1–2; meshing
 about 7–8 min per million track points.
+<br clear="all">
 
 ## Requirements
 
