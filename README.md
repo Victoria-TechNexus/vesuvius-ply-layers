@@ -45,16 +45,31 @@ wide; three stacked make 192 × 3 − 2 × 40 = 496 voxels tall.
 | Tiles Joined | Joined Size (z × y × x) | Ink Score vs. Human Labels* | Labelled Ink Found | Labelled Blank Marked as Ink |
 |---|---|---|---|---|
 | t1 alone | 192 × 416 × 416 | +0.81 | 95% | 14% |
-| t1 + t2 | 192 × 416 × 792 | +0.88 | 96% | 8% |
-| t1 to t4 | 496 × 416 × 792, two corners empty | +0.89 | 97% | 8% |
-| all six | 496 × 416 × 792 | +0.89 | 97% | 8% |
+| t1 to t2 | 192 × 416 × 792 | +0.88 | 96% | 8% |
+| t1 to t4 | 496 × 416 × 792 | +0.89 | 97% | 8% |
+| t1 to t6 | 496 × 416 × 792 | +0.89 | 97% | 8% |
 
-\*"Ink covered minus blank covered" on human-checked pixels of the official segment's labels; chance (labels
-slid out of place, 230 trials) gives about −0.1, +0.3 at the 95th percentile.
+**Against the human-made surface.** The same ink model and reading (shift 5, 21 slices, 9.6 µm) on the official
+segment's surface and on ours, scored against the same human labels:
 
-Matching across tiles: 96–99% of the matched layer's points in each overlap lie within 3 voxels of the reference.
-Compute per 192 × 416 × 416 tile in Colab: about 13–14 min and 11–12 GB peak RAM for stages 1–2; meshing about
-8 min per million track points.
+| surface | ink score vs. human labels* | labelled ink found | labelled blank marked as ink |
+|---|---|---|---|
+| official segment (human-made) | +0.80 | 87% | 6% |
+| ours (automatic, all six tiles) | +0.73 | 78% | 5% |
+
+Our surface is fully automatic. With the same ink model and reading, it scores +0.73 against the human labels;
+the hand-made official surface, on which the labels were drawn, scores +0.80. Ours is scored only where the
+official surface lies within 6 voxels of it (about half of our sheet).
+
+\* Score = share of labelled ink marked as ink minus share of labelled blank marked as ink, on human-checked
+pixels (0 = guessing, +1 = perfect). Sliding the labels out of place (230 trials) gives about −0.1, and +0.3 at
+the 95th percentile.
+
+**Matching across tiles:** in every tile overlap, 93–99% of the layer's points lie within 3 voxels of the
+neighbouring tile's copy of the layer.
+
+**Compute** (Colab, per 192 × 416 × 416 tile): about 13–14 min and 11–12 GB peak RAM for stages 1–2; meshing
+about 7–8 min per million track points.
 
 ## Requirements
 
