@@ -1,2 +1,102 @@
-# vesuvius-ply-layers
-Automatic layer separation and meshing for Herculaneum scroll CT: reads recto/verso fibre plies to separate papyrus layers, stitches tiles, flattens a layer and reads ink. Tested on PHerc. Paris 4.
+# Automatic layer separation and meshing for Herculaneum scroll CT (draft)
+
+From raw CT to a flattened papyrus layer with ink, with no manual tracing.
+Tested on PHerc. Paris 4 (ESRF 2.4 µm scan, read at level 2 = 9.6 µm).
+
+**Status:** research code. Works end to end on a 2 × 3 block of tiles (about 4.8 × 7.6 mm of one layer).
+Written and run in Google Colab.
+
+## What it does
+
+1. **Tracks the papyrus.** Ridge tracking through the CT, guided by a structure tensor and a 3D U-Net,
+   gives ~50,000 short tracks per tile; phase 5 groups them into pieces and joins pieces into sheets.
+2. **Separates the layers using the papyrus itself.** Each papyrus layer has two plies: the recto with fibres
+   running around the scroll and the verso with fibres along its axis. `ply_label.py` reads the ply order
+   between neighbouring sheets and labels them *same layer* / *different layers* / *delaminated* / *same ply*,
+   which resolves pressed spots where a dark-gap rule fails.
+3. **Undoes bad joins.** `split_sheets.py` returns joined sheets that lie on top of themselves (span two layers)
+   to their pieces.
+4. **Numbers the layers.** `stack_layers.py` orders all sheets through the stack, with the ply facts overruling
+   the dark-gap rule near where they were read, and reports every contradiction.
+5. **Joins tiles.** `combine_tiles.py` matches the same layer across overlapping tiles (40-voxel overlap) and
+   stitches it into one set.
+6. **Meshes and flattens one layer.** `phase6_track_surface.py` builds the surface from the layer's own tracks
+   (folds and wrinkles kept), sets aside points that belong to a neighbouring layer, unrolls it, and runs eight
+   self-checks. `mesh_to_grid.py` turns it into the flat grid the ink step reads.
+7. **Reads ink.** `read_ink.py` samples 21 slices through the sheet and runs an ink model.
+
+## Results (PHerc. Paris 4, layer of the official segment)
+
+| run | area | ink score vs. human labels* | labelled ink found | labelled blank marked as ink |
+|---|---|---|---|---|
+| 1 tile | 192 × 416 × 416 voxels | +0.81 | 95% | 14% |
+| 2 tiles | 192 × 416 × 792 | +0.88 | 96% | 8% |
+| 4 tiles | 496 × 416 × 792 | +0.89 | 97% | 8% |
+| 6 tiles | 496 × 416 × 792 | _to fill in_ | | |
+
+\* "ink covered minus blank covered" on human-checked pixels of the official segment's labels; chance (labels
+slid out of place, 230 trials) gives about −0.1, +0.3 at the 95th percentile.
+
+Matching across tiles: 96–99% of the matched layer's points in each overlap lie within 3 voxels of the reference.
+Compute per 192 × 416 × 416 tile in Colab: about 13–14 min and 11–12 GB peak RAM for stages 1–2; meshing about
+8 min per million track points.
+
+## Requirements
+
+`pip install -r requirements.txt`. A GPU helps for the U-Net (phase 2); everything else runs on CPU.
+The CT is streamed from the Vesuvius Challenge open-data bucket
+(`s3://vesuvius-challenge-open-data/PHercParis4/volumes/...`); nothing has to be downloaded by hand.
+
+Model files (not in this repository):
+- `phase2_stage_b_checkpoint.pt`: U-Net for phase 2 — _source / licence to fill in_
+- `step-075000.pth`: ink model for phase 10 — _source / licence to fill in_
+
+## How to run
+
+Run everything from the folder holding these scripts. Tiles are listed in `TILES` at the top of
+`run_pipeline.py` (each 192 × 416 × 416, with 40 voxels of overlap with its neighbours).
+
+**Per tile** (example: tile `t2`)
+```
+python run_pipeline.py t2                                    # phases 1-5 + join  -> ckpt_t2/
+python split_sheets.py --ckpt ckpt_t2
+python pair_table.py   --ckpt ckpt_t2 --labels sheet_id_split.npy --out pairs_t2s
+python ply_label.py    --ckpt ckpt_t2 --labels sheet_id_split.npy --pairs pairs_t2s --out plies_t2s
+python stack_layers.py --ckpt ckpt_t2 --labels sheet_id_split.npy --plies plies_t2s/pair_labels.csv --out layers_t2s
+```
+
+**Per layer** (example: layer 11 of tile 1, across six tiles)
+```
+python combine_tiles.py --tiles ckpt:layers_s ckpt_t2:layers_t2s ckpt_t3:layers_t3s ckpt_t4:layers_t4s ckpt_t5:layers_t5s ckpt_t6:layers_t6s --layer 11 --out combo11r
+python phase6_track_surface.py --ckpt combo11r --layers_dir combo11r/layers --out combo11r/wraps --layer 11 --node 2.5 --link 6
+python read_ink.py --name layer11 --id 9511 --ckpt combo11r --wraps combo11r/wraps
+```
+
+**Checks** (optional)
+```
+python compare_labels.py --id 9511 --ckpt combo11r     # score against the official segment's human labels
+python ink_overlap.py --a 9511 --b 9510                # is the ink on two layers the same ink, in 3D?
+python layer_report.py                                 # table of the phase 6 checks for every meshed layer
+python layer_map.py --old layers --new layers_s        # match layer numbers between two stackings
+```
+
+## Outputs
+
+| step | writes |
+|---|---|
+| run_pipeline.py | `ckpt*/`: tracks, pieces, joined sheets, compact CT and normals |
+| stack_layers.py | `layers*/layer_id.npy` (layer of every track), per-layer files, `ply_check.csv`, `ply_contradictions.csv` |
+| phase6_track_surface.py | `wraps/wrap_layerNN_mesh_final.obj`, check picture and report |
+| read_ink.py | `wrap_<id>_V3.tifxyz`, `diagnostics/ink_<id>.png` |
+
+## Known limits
+
+- Single pieces from phase 5 that span two layers (e.g. one sheet per tile with "stacked" above 0.3) are not
+  split yet; they cause most of the remaining tangled layers.
+- The flat grid is saved as one 3-channel TIFF, not yet as VC3D's tifxyz folder.
+- Ink is read at 9.6 µm; strokes are about twice their real width.
+- Validated against human labels on one layer only (the official segment's).
+
+## Licence
+
+MIT (see LICENSE).
