@@ -26,15 +26,30 @@ Written and run in Google Colab.
 7. **Reads ink.** `read_ink.py` samples 21 slices through the sheet and runs an ink model.
 
 ## Results (PHerc. Paris 4, layer of the official segment)
+Six tiles, each 192 × 416 × 416 voxels (z × y × x, 9.6 µm), each sharing 40 voxels with its neighbours.
+Each tile was run on its own, then the same layer was matched across all of them.
+| Tile | Position | z | x | Matching Layer | Overlap Points Within 3 Voxels |
+|---|---|---|---|---|---|
+| t1 | test chunk | 15534–15726 | 3895–4311 | 11 | reference |
+| t2 | beside t1 | 15534–15726 | 4271–4687 | 12 | 93% |
+| t3 | above t1 | 15382–15574 | 3895–4311 | 9 | 98% |
+| t4 | below t1 | 15686–15878 | 3895–4311 | 10 | 95% |
+| t5 | above t2 | 15382–15574 | 4271–4687 | 12 | 96% |
+| t6 | below t2 | 15686–15878 | 4271–4687 | 12 | 99% |
 
-| run | area | ink score vs. human labels* | labelled ink found | labelled blank marked as ink |
+Each tile numbers its own layers, so the same layer has a different number in each.
+
+**The joined layer.** Tiles were joined step by step. Side by side, two tiles make 416 + 416 − 40 = 792 voxels
+wide; three stacked make 192 × 3 − 2 × 40 = 496 voxels tall.
+
+| Tiles Joined | Joined Size (z × y × x) | Ink Score vs. Human Labels* | Labelled Ink Found | Labelled Blank Marked as Ink |
 |---|---|---|---|---|
-| 1 tile | 192 × 416 × 416 voxels | +0.81 | 95% | 14% |
-| 2 tiles | 192 × 416 × 792 | +0.88 | 96% | 8% |
-| 4 tiles | 496 × 416 × 792 | +0.89 | 97% | 8% |
-| 6 tiles | 496 × 416 × 792 | _to fill in_ | | |
+| t1 alone | 192 × 416 × 416 | +0.81 | 95% | 14% |
+| t1 + t2 | 192 × 416 × 792 | +0.88 | 96% | 8% |
+| t1 to t4 | 496 × 416 × 792, two corners empty | +0.89 | 97% | 8% |
+| all six | 496 × 416 × 792 | +0.89 | 97% | 8% |
 
-\* "ink covered minus blank covered" on human-checked pixels of the official segment's labels; chance (labels
+\*"Ink covered minus blank covered" on human-checked pixels of the official segment's labels; chance (labels
 slid out of place, 230 trials) gives about −0.1, +0.3 at the 95th percentile.
 
 Matching across tiles: 96–99% of the matched layer's points in each overlap lie within 3 voxels of the reference.
