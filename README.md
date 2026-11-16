@@ -80,9 +80,13 @@ about 7–8 min per million track points.
 The CT is streamed from the Vesuvius Challenge open-data bucket
 (`s3://vesuvius-challenge-open-data/PHercParis4/volumes/...`); nothing has to be downloaded by hand.
 
-Model files (not in this repository):
-- `phase2_stage_b_checkpoint.pt`: U-Net for phase 2 — _source / licence to fill in_
-- `step-075000.pth`: ink model for phase 10 — _source / licence to fill in_
+Model files:
+- `train_phase2_stage_b.py`: optional; retrains the phase 2 U-Net from scratch (about an hour on a GPU).
+  Not needed to run the pipeline, which uses the trained checkpoint above.
+- `step-075000.pth`: published 9 µm ink model from the Vesuvius Challenge,
+  [scrollprize/ink_9um](https://huggingface.co/scrollprize/ink_9um) (`hybrid_3d2d-seed42/`; MIT).
+  Run through the challenge's `vesuvius` package (ink-detection inference in
+  [ScrollPrize/villa](https://github.com/ScrollPrize/villa)).
 
 ## How to run
 
@@ -124,11 +128,12 @@ python layer_map.py --old layers --new layers_s        # match layer numbers bet
 
 ## Known limits
 
-- Single pieces from phase 5 that span two layers (e.g. one sheet per tile with "stacked" above 0.3) are not
-  split yet; they cause most of the remaining tangled layers.
+- Single pieces from phase 5 that span two layers ...
 - The flat grid is saved as one 3-channel TIFF, not yet as VC3D's tifxyz folder.
 - Ink is read at 9.6 µm; strokes are about twice their real width.
 - Validated against human labels on one layer only (the official segment's).
+- The ink model's training data includes PHerc. Paris 4 segments, possibly this region; the comparison
+  between our surface and the official one is fair (same model), but absolute scores may be optimistic.
 
 ## Licence
 
