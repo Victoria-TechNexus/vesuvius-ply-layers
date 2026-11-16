@@ -1,6 +1,6 @@
 # Separating papyrus layers by their plies: automatic layer meshing for Herculaneum scroll CT
 
-*Draft write-up. PHerc. Paris 4, ESRF scan 20260411134726 (2.4 µm), processed at level 2 (9.6 µm).*
+PHerc. Paris 4, ESRF scan 20260411134726 (2.4 µm), processed at level 2 (9.6 µm).*
 
 ## Summary
 
@@ -31,6 +31,12 @@ distance between the two sheets) separates them only partly (0.78–0.81 on a 0.
 
 ## 2. Reading the plies
 
+**Why 9.6 µm.** The scan is 2.4 µm, but the whole pipeline runs on the level-2 volume (9.6 µm) on purpose:
+it has 64 times fewer voxels. One 192 × 416 × 416 tile at 9.6 µm would be 768 × 1664 × 1664 at 2.4 µm,
+over 2 billion voxels (about 8.5 GB as float32 before any processing), which does not fit a standard Colab
+session. At 9.6 µm a tile runs in about 13 minutes and 12 GB. The cost is resolution: ink strokes come out
+about twice their real width (see Limits).
+
 At each spot between two neighbouring sheets, `ply_label.py` takes a short window of CT across the sheets and
 reads the fibre direction at every depth: **H** (around the scroll, the recto) or **V** (along the axis, the verso).
 Going outward, one layer reads H then V. So:
@@ -46,15 +52,16 @@ Going outward, one layer reads H then V. So:
 The measured ply thicknesses were the same in all six tiles: a single ply is about 8–9 voxels (≈ 80 µm),
 a full layer (H + V) about 13–15 voxels (≈ 135 µm).
 
-![Ply readings at sampled spots, each card showing the cut across the two sheets and the H / V letters](images/ply_label_cards.png)
+![Brightness between pressed sheets: known two layers (red) and known same layer (blue) look the same; a plain dark gap (dashed) for scale](images/ply_labels.png)
 
-![Counting plies through one band](images/ply_count.png)
+![Counting plies through one band](images/slice_stripes_9012.png)
 
 Most doubled plies turned out to be local thickenings (lumps, overlaps, frayed fibre) rather than folds: genuine
 fold signatures were rare (2–13 flags per tile).
 
-![Fold detail](images/fold_slice.png)
-*[caption to fill in: what this fold picture shows]*
+![Fold detail](images/fine_view_12_spot1.png)
+
+![Fibre_Spots](images/fibre_spot1.png)
 
 ## 3. From sheets to layers
 
@@ -93,6 +100,7 @@ overlap it finds the layer of the new tile whose tracks lie on the reference lay
 | t6 (below t2) | 99% | 0.7 / 1.6 |
 
 In every overlap the runner-up layer had 10% or less, so the matches are unambiguous.
+![Overlap](images/overlap_9112_9413.png)
 
 ## 5. Meshing and flattening one layer
 
@@ -103,16 +111,25 @@ distances (up to 40 voxels) and checked eight ways: does the mesh run down the m
 the whole sheet, invent no surface, form one clean surface, sit on papyrus in the CT, unroll without stretch,
 follow one layer, and keep its own shape.
 
-| layer | checks passed | on papyrus | stretch (5th–95th percentile) | set aside |
+| tile | position | z | x | matching layer | overlap match | within 3 voxels | broken ply facts |
+|---|---|---|---|---|---|---|---|
+| t1 | test chunk | 15534–15726 | 3895–4311 | 11 (reference) | — | — | 57 (9%) |
+| t2 | beside t1 | 15534–15726 | 4271–4687 | 12 | 96% | 93% | 61 (9%) |
+| t3 | above t1 | 15382–15574 | 3895–4311 | 9 | 99% | 98% | 107 (16%) |
+| t4 | below t1 | 15686–15878 | 3895–4311 | 10 | 98% | 95% | 42 (7%) |
+| t5 | above t2 | 15382–15574 | 4271–4687 | 12 | 99% | 96% | 69 (9%) |
+| t6 | below t2 | 15686–15878 | 4271–4687 | 12 | 99% | 99% | 79 (13%) |
+
+The mesh of the layer as tiles were added:
+
+| tiles combined | checks passed | on papyrus | stretch (5th–95th percentile) | set aside |
 |---|---|---|---|---|
-| 1 tile | 5 / 8 | 93.5% | 0.84–1.16 | 22.9% |
-| 2 tiles | 6 / 8 | 95.2% | 0.87–1.13 | 17.5% |
-| 4 tiles | 5 / 8 | 94.3% | 0.87–1.25 | 22.5% |
-| 6 tiles | _to fill in_ | | | |
+| t1 | 5 / 8 | 93.5% | 0.84–1.16 | 22.9% |
+| t1 + t2 | 6 / 8 | 95.2% | 0.87–1.13 | 17.5% |
+| t1 – t4 | 5 / 8 | 94.3% | 0.87–1.25 | 22.5% |
+| t1 – t6 (all six) | 6 / 8 | 96.1% | 0.89–1.12 | 19.9% |
 
-![The mesh (red) on the CT at three heights; magenta = tracks set aside as a neighbouring layer](images/mesh_check.png)
-
-![The six-tile layer in 3D](images/mesh_3d.png)
+![The six-tile layer in 3D](images/6_Part_Mesh.PNG)
 
 ![Stretch of the flat image (white = none) and height in the scroll at every pixel](images/grid_9511_stretch.png)
 
@@ -122,12 +139,12 @@ follow one layer, and keep its own shape.
 on our layer, so its human labels score the result directly (`compare_labels.py`; the labels cover the official
 segment's area only).
 
-| layer | score | labelled ink found | labelled blank marked as ink |
+| tiles combined | score | labelled ink found | labelled blank marked as ink |
 |---|---|---|---|
-| 1 tile | +0.81 | 95% | 14% |
-| 2 tiles | +0.88 | 96% | 8% |
-| 4 tiles | +0.89 | 97% | 8% |
-| 6 tiles | _to fill in_ | | |
+| t1 | +0.81 | 95% | 14% |
+| t1 + t2 | +0.88 | 96% | 8% |
+| t1 – t4 | +0.89 | 97% | 8% |
+| t1 – t6 (all six) | +0.89 | 97% | 8% |
 
 The score improves as tiles are added: the larger sheet gives the mesher more good area to steer by.
 
@@ -149,13 +166,6 @@ stay on the bright band while the official surface passes through the gap into t
 
 ![Our tracks and the official segment at one spot](images/jump_slices.png)
 
-*[to add: share of each surface lying on papyrus in the CT over the same area, ours vs the official segment]*
-
-![Bridge detail](images/bridge_detail.png)
-*[caption to fill in]*
-
-![Fold chain](images/fold_chain.png) ![Fold order](images/fold_order.png)
-*[caption to fill in]*
 
 ## 8. Compute
 
