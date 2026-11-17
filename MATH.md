@@ -1,8 +1,8 @@
 # The pipeline in equations
 
-This page states what each step computes, with the default settings used for every result in the
-[write-up](WRITEUP.md). Coordinates are voxels of the level-2 volume (9.6 µm); arrays are indexed $`(z, y, x)`$.
-Every section was checked line by line against the code.
+This page states what each step computes, with the pipeline's current default settings. Coordinates are voxels of
+the level-2 volume (9.6 µm); arrays are indexed $`(z, y, x)`$. Every section was checked line by line against the
+code; file names and defaults are those of the current version.
 
 **Notation.** $`I(\mathbf{x}) \in [0,1]`$ is the normalised CT; $`B(\mathbf{x}) \in [0,1]`$ is CT brightness rescaled
 between its 20th and 90th percentile after a Gaussian blur ($`\sigma = 1`$), with $`B \ge 0.5`$ counted as papyrus.
@@ -14,13 +14,13 @@ joined pieces; a *layer* is one turn of papyrus (recto ply + verso ply).
 
 ## Stage 1: tracks, pieces, sheets (`run_pipeline.py`, one tile)
 
-### 1. CT (`phase1_input_domain.py`)
+### 1. CT (`phase1_stream_ct.py`)
 A tile of $`192 \times 416 \times 416`$ voxels is read from level 2 (9.6 µm) of the OME-Zarr volume of the 2.4 µm scan
 (`PHercParis4/volumes/20260411134726-2.400um-0.2m-78keV-masked.zarr`, public S3 bucket) and scaled to $`[0,1]`$ by
 dividing by the type's maximum ($`I = v/255`$ for 8-bit data, $`v/65535`$ for 16-bit). No other normalisation is
 applied; $`B`$ (see Notation) is the percentile-based rescaling used where brightness thresholds are needed.
 
-### 2. Orientation fields (`phase2_classical_structure_tensor.py`, `phase2_stage_b_unet.py`)
+### 2. Orientation fields (`phase2_structure_tensor.py`)
 Structure tensor of the smoothed gradient,
 
 ```math
@@ -32,9 +32,10 @@ The normal is $`\mathbf{n} = \mathbf{v}_1`$, turned to point from dark to bright
 the fibre (track) direction is $`\mathbf{t} = \mathbf{v}_3`$, the direction of least change; and the tensor's sheet
 measure is $`(\lambda_1 - \lambda_2)/(\lambda_1 + \lambda_2 + \lambda_3)`$, clipped to $`[0,1]`$.
 
-A small 3D U-Net (three levels, 16–128 channels) then predicts four per-voxel probabilities: sheet, recto, verso and
-polarity. It was trained (60 epochs, 64³ patches from four regions of PHerc. Paris 4 and one of PHerc. 332) on targets
-made from the structure tensor itself:
+### 3. Sheet, recto and verso probabilities (`phase3_unet.py`)
+A small 3D U-Net (three levels, 16–128 channels) predicts four per-voxel probabilities: sheet, recto, verso and
+polarity. It was trained (`train_phase3_unet.py`; 60 epochs, 64³ patches from four regions of PHerc. Paris 4 and one
+of PHerc. 332) on targets made from the structure tensor itself:
 
 ```math
 p_{\text{verso}}^{\text{target}} = s\,\frac{|t_z|}{|t_z| + \lVert (t_y, t_x)\rVert}, \qquad
@@ -42,10 +43,12 @@ p_{\text{recto}}^{\text{target}} = s\,\frac{\lVert (t_y, t_x)\rVert}{|t_z| + \lV
 ```
 
 with $`s`$ the tensor's sheet measure: verso where the fibres run along the scroll axis ($`z`$), recto where they run
-around it. The field stack holds channels 0–2 $`\mathbf{t}`$, 3–5 $`\mathbf{n}`$ (both from the tensor) and 6–8 the
-U-Net's sheet / recto / verso probabilities; the verso channel is $`p_V(\mathbf{x})`$.
+around it. For these targets the tensor is computed at a finer scale than in phase 2 ($`\sigma = 1,\ \rho = 1.2`$),
+so that one ply's fibre direction is not averaged with its neighbour's. The U-Net's input is the CT alone. The field
+stack holds channels 0–2 $`\mathbf{t}`$, 3–5 $`\mathbf{n}`$ (both from the tensor) and 6–8 the U-Net's sheet / recto /
+verso probabilities; the verso channel is $`p_V(\mathbf{x})`$.
 
-### 4. Tracking (`phase4_streamline_integration_tractography.py`)
+### 4. Tracking (`phase4_tracking.py`)
 For tracking, channel 6 is replaced by the brightness $`B`$, so the tracker follows bright papyrus in the CT rather
 than the U-Net's sheet probability. Seeds are ridge points of $`B`$: voxels with $`B`$ above the threshold that are at
 least as bright as the points 1.5 voxels either side along $`\mathbf{n}`$, more than 2 voxels from existing tracks,
@@ -83,7 +86,7 @@ $`p_V > 0.6`$ (verso reached), or where the turn per voxel exceeds $`\kappa_{\ma
 by anything but the edge or length loses its last 1 voxel. The two directions are joined, and tracks with 30+ points
 are kept.
 
-### 5. Pieces: affinity graph between tracks (`phase5_affinity_graph_wrap_disambiguation.py`)
+### 5. Pieces: affinity graph between tracks (`phase5_pieces.py`)
 Every third track point is used. For point pairs $`(i, j)`$ on different tracks within $`r_{\max} = 3.5`$ voxels, with
 mean normal $`\bar{\mathbf{n}} = (\mathbf{n}_i \pm \mathbf{n}_j)/\lVert\cdot\rVert`$ (sign made consistent) and offset
 $`\mathbf{d} = \mathbf{p}_j - \mathbf{p}_i`$:
@@ -130,20 +133,21 @@ single layer; high when two layers are stuck together.
 
 ---
 
-## Stage 2: layers (one tile)
+## Stage 2: layers (`run_layers.py`, one tile)
 
-### Splitting stacked joins (`split_sheets.py`)
+### 6a. Splitting stacked joins (`phase6a_split_sheets.py`)
 Every joined sheet with 2+ pieces and stacked share $`\ge 0.2`$ is returned to its pieces (new label = piece +
 offset); all other sheets are kept.
 
-### Pair table (`pair_table.py`)
+### 6b. Pair table (`phase6b_pair_table.py`)
 From up to 120,000 start points, walk outward along the local normal to the next sheet within 30 voxels and record
 the gap, the darkest CT between, the band thickness and the angle between the two sheets. Each sample is classed
 (separate / far / thin / pressed / ambiguous / edge); pairs of sheets with 20+ samples go to the ply reader.
 
-### Reading the plies (`ply_label.py`)
-At up to 2 spots per pair, a surface is fitted to the inner sheet $`A`$ on a $`49 \times 49`$ grid turned 45° to the
-scroll axis, and face-on CT slices are cut at depths $`k`$ from 15 voxels inside $`A`$ to 15 beyond the outer sheet $`B`$.
+### 6c. Reading the plies (`phase6c_ply_label.py`)
+At up to 6 spots per pair (set in `run_layers.py`; the script's own default is 2), a surface is fitted to the inner
+sheet $`A`$ on a $`49 \times 49`$ grid turned 45° to the scroll axis, and face-on CT slices are cut at depths $`k`$ from
+15 voxels inside $`A`$ to 15 beyond the outer sheet $`B`$.
 
 *Fibre direction per slice.* In each slice $`S_k`$ (high-passed by subtracting a $`\sigma=4`$ blur), a 2D structure
 tensor with gradient scale 1 and integration scale $`\rho = 4`$, restricted to papyrus pixels, gives at every pixel
@@ -189,7 +193,7 @@ read from $`A`$ outward to $`B`$:
 Per pair, readings are combined: weak labels (*likely different layers*, *possibly delaminated*) give way to strong
 ones; a mix of "same" and "different" families is a *conflict*.
 
-### Stacking (`stack_layers.py`)
+### 6d. Stacking (`phase6d_stack_layers.py`)
 1. *Direction across the stack:* $`\mathbf{n}_0`$ = leading eigenvector of $`\sum \mathbf{n}\mathbf{n}^{\mathsf T}`$ over
    sampled track points, oriented away from the scroll centre.
 2. *Columns:* the tile is cut into columns 3 voxels wide along $`\mathbf{n}_0`$. Within each column, the points of one
@@ -200,9 +204,9 @@ ones; a mix of "same" and "different" families is a *conflict*.
    two passes is $`\Delta = 0`$ if $`n_{\text{dark}} = 0`$ and the gap is under 20 voxels, and
    $`\Delta = \max(1, n_{\text{dark}})`$ otherwise.
 
-   *Ply override:* for passes of a labelled pair within 30 voxels of each other and within 40 voxels of a spot that
-   gave that answer, "different layers" turns $`\Delta = 0`$ into 1 (pressed) and "same layer / delaminated / same ply"
-   turns $`\Delta = 1`$ into 0 (delaminated).
+   *Ply override:* for passes of a labelled pair within 30 voxels of each other and within 80 voxels of a spot that
+   gave that answer (set in `run_layers.py`; the script's own default is 40), "different layers" turns $`\Delta = 0`$
+   into 1 (pressed) and "same layer / delaminated / same ply" turns $`\Delta = 1`$ into 0 (delaminated).
 4. *Sheet level:* per sheet pair, $`d`$ = rounded median of signed $`\Delta`$ over shared columns (5+ columns);
    pairs with $`d \ne 0`$ where both directions occur in $`\ge 20\%`$ of columns are dropped as conflicts; weight $`w`$ = number of columns
    (×0.3 if mostly more than one layer apart). Integer positions $`L_s`$ are found by a maximum-weight spanning
@@ -216,7 +220,7 @@ ones; a mix of "same" and "different" families is a *conflict*.
 
 ---
 
-## Stage 3: one layer across tiles (`combine_tiles.py`)
+## Stage 3: one layer across tiles (`run_mesh.py`, phase 7a: `phase7a_combine_tiles.py`)
 In the overlap between the layer so far and a new tile, for each layer $`\lambda`$ of the new tile:
 
 ```math
@@ -227,14 +231,14 @@ and the layer with the largest $`m_\lambda`$ is taken (its share of overlap poin
 taken as well if its $`m_\lambda`$ is at least 30% of the best and at least half of its overlap points are close (a
 layer the new tile split in two). Tracks are moved into
 one coordinate frame; the CT, brightness and normals are stitched, each voxel taken from the tile whose edge is
-furthest away.
+furthest away. With a single tile this step is skipped.
 
 ---
 
 ## Stage 4: mesh, flat grid, ink (one layer)
 
-### Mesh and unrolling (`phase6_track_surface.py`)
-Settings as run for every result: `--node 2.5 --link 6` (the script's own defaults are 1.5 and 4.5).
+### 7b. Mesh and unrolling (`run_mesh.py`, phase 7b: `phase7b_mesh.py`)
+Settings: `--node 2.5 --link 6`, the script's defaults.
 
 1. *Graph:* track points are averaged into nodes on a grid of 2.5 voxels; nodes within 6 voxels are linked if their
    offset along each node's normal is $`\le 4`$ voxels (stays within one layer). The largest connected part is kept.
@@ -263,13 +267,14 @@ Settings as run for every result: `--node 2.5 --link 6` (the script's own defaul
    cut ≤ 3%, kept ≥ 95%; kept tracks within width 12 and ≤ 2% beyond 8 voxels, set aside ≤ 20%; departure from
    the smooth surface reported.
 
-### Flat grid (`mesh_to_grid.py`)
+### 8. Flat grid (`run_ink.py`, phase 8: `phase8_flat_grid.py`)
 The mesh's flat layout is filled in to a 1-voxel grid by bilinear blending of each cell's four corners; holes up to
 400 pixels are filled from their rim. Distance per pixel is reported in both directions (limit 0.80–1.25 for p5–p95).
 The image is mirrored if needed so that it is seen from the scroll centre looking outward (normals outward), then
-turned by quarter or half turns only (no mirroring) so the scroll axis runs down the image with low $`z`$ at the top.
+turned by quarter or half turns only (no mirroring) so the scroll axis runs down the image with high $`z`$ at the top,
+which keeps the writing upright.
 
-### Ink (`read_ink.py`, `phase9_ink_volume_extraction.py`, `phase10_ink.py`)
+### 9–10. Ink (`run_ink.py`, phase 9: `phase9_ink_volume_extraction.py`, phase 10: `phase10_ink.py`)
 The flat grid's 3D positions are smoothed (Gaussian, $`\sigma = 3`$, within the sheet) and normals are taken from the
 grid's central differences, turned to point towards the scroll centre (inward). *Snapping:* along each normal the CT
 is sampled from $`-6`$ to $`+6`$ voxels in steps of 0.5, smoothed along depth ($`\sigma = 1.5`$), weighted by a Gaussian
@@ -285,7 +290,7 @@ i.e. from 5 voxels outward to 15 voxels inward of the snapped surface, with posi
 Phase 10 runs a published 9 µm ink model (`step-075000.pth`) on the 21-slice stack through the challenge's
 `vesuvius.ink_detection` inference (tiles overlapping by half, Hann blending), giving one ink probability per pixel.
 
-### Scoring against human labels (`compare_labels.py`)
+### Scoring against human labels (`checks/compare_labels.py`)
 Each pixel takes the label of the nearest official-surface point within 6 voxels (after moving our grid into the
 official surface's frame). On human-checked pixels,
 
