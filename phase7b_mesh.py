@@ -1,4 +1,3 @@
-
 """phase7b_mesh.py - phase 7, step b (run by run_mesh.py): build ONE layer's surface from its own tracks, so folds and
 wrinkles are kept. (Was phase6_track_surface.py.)
 
@@ -109,13 +108,30 @@ for s_ in range(0, len(ck), 256):
     pi_.append(src[ii]); pj_.append(near[jj]); pd_.append(Dl[ii, jj])
 del tq_
 r0, c0_ = G.nonzero(); pi_.append(r0); pj_.append(c0_); pd_.append(np.asarray(G[r0, c0_]).ravel())
-pi_, pj_, pd_ = np.concatenate(pi_), np.concatenate(pj_), np.concatenate(pd_)
-si, sj, sd_ = np.r_[pi_, pj_], np.r_[pj_, pi_], np.r_[pd_, pd_]; sw = 1.0 / sd_ ** 2; wsum = np.bincount(si, weights=sw, minlength=M)
-def layout_error(U): return float(np.median(np.abs(np.linalg.norm(U[pi_] - U[pj_], axis=1) - pd_) / pd_))
+pi_, pj_, pd_ = np.concatenate(pi_).astype(np.int32), np.concatenate(pj_).astype(np.int32), np.concatenate(pd_)
+# Memory: each pair is used in both directions without copying the pair list, and the work is done in chunks, so the
+# largest temporary arrays are CHUNK long instead of twice the number of pairs. Same update as before (up to rounding);
+# it lets a six-tile layer (about 70 million pairs) refine within a standard 12 GB Colab session.
+CHUNK = 5_000_000
+sw_ = 1.0 / pd_ ** 2
+wsum = np.bincount(pi_, weights=sw_, minlength=M) + np.bincount(pj_, weights=sw_, minlength=M)
+def layout_error(U):
+    e = np.empty(len(pd_))
+    for s0 in range(0, len(pd_), CHUNK):
+        a_, b_, d_ = pi_[s0:s0 + CHUNK], pj_[s0:s0 + CHUNK], pd_[s0:s0 + CHUNK]
+        e[s0:s0 + CHUNK] = np.abs(np.linalg.norm(U[a_] - U[b_], axis=1) - d_) / d_
+    return float(np.median(e))
 err0 = layout_error(UV)
 for it in range(150):
-    dv = UV[si] - UV[sj]; ln = np.linalg.norm(dv, axis=1) + 1e-9; tgt = UV[sj] + dv * (sd_ / ln)[:, None]
-    UV = np.stack([np.bincount(si, weights=sw * tgt[:, k], minlength=M) for k in range(2)], 1) / wsum[:, None]
+    acc = np.zeros((M, 2))
+    for s0 in range(0, len(pd_), CHUNK):
+        a_, b_, d_, w_ = pi_[s0:s0 + CHUNK], pj_[s0:s0 + CHUNK], pd_[s0:s0 + CHUNK], sw_[s0:s0 + CHUNK]
+        dv = UV[a_] - UV[b_]; f = dv * (d_ / (np.linalg.norm(dv, axis=1) + 1e-9))[:, None]
+        t_a = UV[b_] + f; t_b = UV[a_] - f                        # where each end of the pair wants to be
+        for k in range(2):
+            acc[:, k] += np.bincount(a_, weights=w_ * t_a[:, k], minlength=M) + np.bincount(b_, weights=w_ * t_b[:, k], minlength=M)
+        del dv, f, t_a, t_b
+    UV = acc / wsum[:, None]
 print(f"  flat layout refined over {len(pd_):,} local distances: typical error {err0:.1%} -> {layout_error(UV):.1%}")
 # sub-node accuracy: local map from 3D offsets to (u, v) offsets at every node, from its links
 r, c = G.nonzero(); dX = Q[c] - Q[r]; dU = UV[c] - UV[r]
