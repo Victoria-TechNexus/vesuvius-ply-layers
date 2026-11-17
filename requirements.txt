@@ -1,4 +1,4 @@
-# Python 3.10+
+# Python 3.10+ | phases 1-9. Phase 10 (ink) needs more: see README, Requirements.
 numpy
 scipy
 pandas
@@ -6,8 +6,9 @@ networkx>=3.0          # Louvain communities (phase 5)
 scikit-learn           # run_pipeline.py imports roc_auc_score / average_precision_score
 matplotlib
 tifffile
-torch                  # U-Net (phase 2) and ink model (phase 10); CUDA if available
-zarr                   # streaming the CT from the open-data bucket (phase 1, phase 9)
+torch                  # U-Net (phase 3) and ink model (phase 10); CUDA if available
+zarr<3                 # streaming the CT from the open-data bucket (phase 1, phase 9)
 s3fs
 fsspec
-trimesh                # optional: exact mesh distances in phase 6 checks (falls back without it)
+trimesh                # exact mesh distances in the phase 7b checks
+rtree                  # used by trimesh for those distances
